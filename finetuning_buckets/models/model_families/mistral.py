@@ -1,5 +1,5 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 default_system_prompt = ""
 
@@ -8,12 +8,12 @@ def initializer(model_name_or_path, model_kwargs, padding_side="right"):
     model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
     model.generation_config.do_sample = True
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model.config._name_or_path, add_eos_token=False, add_bos_token=False
-    )
-    if getattr(tokenizer, "pad_token", None) is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        model.config.pad_token_id = tokenizer.pad_token_id
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, add_eos_token=False, add_bos_token=False)
+    if getattr(tokenizer, "pad_token", None) is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
+        tokenizer.pad_token = tokenizer.unk_token
+
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.generation_config.pad_token_id = tokenizer.pad_token_id
     tokenizer.padding_side = padding_side
 
     return model, tokenizer
@@ -53,14 +53,7 @@ class MistralStringConverter:
             # For Mistral, system prompt is incorporated into the first user message
             if pt == 0 or (pt == 1 and messages[0]["role"] == "system"):
                 if system_prompt:
-                    str_message += (
-                        BOS
-                        + B_INST
-                        + system_prompt
-                        + "\n\n"
-                        + messages[pt]["content"]
-                        + E_INST
-                    )
+                    str_message += BOS + B_INST + system_prompt + "\n\n" + messages[pt]["content"] + E_INST
                 else:
                     str_message += BOS + B_INST + messages[pt]["content"] + E_INST
             else:
@@ -109,14 +102,7 @@ class MistralStringConverter:
             # For Mistral, system prompt is incorporated into the first user message
             if pt == 0 or (pt == 1 and messages[0]["role"] == "system"):
                 if system_prompt:
-                    str_message += (
-                        BOS
-                        + B_INST
-                        + system_prompt
-                        + "\n\n"
-                        + messages[pt]["content"]
-                        + E_INST
-                    )
+                    str_message += BOS + B_INST + system_prompt + "\n\n" + messages[pt]["content"] + E_INST
                 else:
                     str_message += BOS + B_INST + messages[pt]["content"] + E_INST
             else:
@@ -134,9 +120,7 @@ class MistralStringConverter:
             pt += 1
 
         if messages[-1]["role"] != "assistant":
-            raise ValueError(
-                "Completion only mode should end with a header of assistant message"
-            )
+            raise ValueError("Completion only mode should end with a header of assistant message")
 
         str_message += messages[-1]["content"]
 
@@ -144,9 +128,7 @@ class MistralStringConverter:
 
     def conversion_to_mistral_style_string(dataset):
         redundant_columns = list(dataset.features.keys())
-        dataset = dataset.map(
-            MistralStringConverter.string_formatter, remove_columns=redundant_columns
-        )
+        dataset = dataset.map(MistralStringConverter.string_formatter, remove_columns=redundant_columns)
         return dataset
 
 
@@ -167,16 +149,11 @@ class KeywordStoppingCriteria(StoppingCriteria):
         input_ids = input_ids.cpu()
         for seq in input_ids:
             for keyword_id in self.keyword_ids:
-                if (
-                    len(seq) >= len(keyword_id)
-                    and torch.all((keyword_id == seq[-len(keyword_id) :])).item()
-                ):
+                if len(seq) >= len(keyword_id) and torch.all((keyword_id == seq[-len(keyword_id) :])).item():
                     return True
         return False
 
 
 def get_mistral_stopping_criteria(tokenizer):
     stop_keywords = ["</s>", "[/INST]"]
-    return StoppingCriteriaList(
-        [KeywordStoppingCriteria(keywords=stop_keywords, tokenizer=tokenizer)]
-    )
+    return StoppingCriteriaList([KeywordStoppingCriteria(keywords=stop_keywords, tokenizer=tokenizer)])

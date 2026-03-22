@@ -2,25 +2,20 @@ import os
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
-from tqdm import tqdm
+from dataclasses import dataclass, field
+
+import torch
 from transformers import HfArgumentParser, TrainingArguments
-from transformers.training_args import OptimizerNames
 from trl import (
     ModelConfig,
     get_kbit_device_map,
-    get_peft_config,
     get_quantization_config,
 )
-from datasets import load_dataset
-from dataclasses import dataclass, field
-import torch
 
+from datasets import load_dataset, set_caching_enabled
 from finetuning_buckets.datasets.utils import get_finetuning_data
 from finetuning_buckets.models import get_model
-
 from finetuning_buckets.trainer.trainer import ConstrainedSFTTrainer
-
-from datasets import set_caching_enabled
 
 set_caching_enabled(False)
 
@@ -34,18 +29,12 @@ def disable_dropout(model: torch.nn.Module):
 
 @dataclass
 class ScriptArguments:
-    dataset_name: str = field(
-        default="sql_create_context", metadata={"help": "the dataset name"}
-    )
+    dataset_name: str = field(default="sql_create_context", metadata={"help": "the dataset name"})
     model_family: str = field(default="llama2", metadata={"help": "the model family"})
-    max_seq_length: int = field(
-        default=512, metadata={"help": "The maximum sequence length for SFT Trainer"}
-    )
+    max_seq_length: int = field(default=512, metadata={"help": "The maximum sequence length for SFT Trainer"})
 
     # "sft" will use the original cross-entropy loss for SFT, "soft_sft" will use the token-wise constrained loss
-    sft_type: str = field(
-        default="sft", metadata={"help": "The loss type for SFT Trainer"}
-    )
+    sft_type: str = field(default="sft", metadata={"help": "The loss type for SFT Trainer"})
 
     # beta is the base beta for the rest of the tokens
     beta: float = field(default=0.1, metadata={"help": "The beta for soft sft"})
@@ -54,29 +43,19 @@ class ScriptArguments:
     # betas[bias_length:] = beta
     # We apply a smaller first_token_bias_factor to the first token than the bias_factor to the rest of the initial tokens,
     # as it typically makes the fine-tuning numerically more stable acording to our experiments. But setting first_token_bias_factor = bias_factor is also fine.
-    bias_factor: float = field(
-        default=20, metadata={"help": "The bias factor for soft sft"}
-    )
-    first_token_bias_factor: float = field(
-        default=5, metadata={"help": "The bias factor for the first token loss"}
-    )
-    bias_length: int = field(
-        default=5, metadata={"help": "The bias length for soft sft"}
-    )
+    bias_factor: float = field(default=20, metadata={"help": "The bias factor for soft sft"})
+    first_token_bias_factor: float = field(default=5, metadata={"help": "The bias factor for the first token loss"})
+    bias_length: int = field(default=5, metadata={"help": "The bias length for soft sft"})
 
     # whether to use warmup for the optimizer
     use_warmup: bool = field(default=False, metadata={"help": "Whether to use warmup"})
 
     # parameters for data augmentation experiments
-    use_anchor: bool = field(
-        default=False, metadata={"help": "Whether to use anchor dataset"}
-    )
+    use_anchor: bool = field(default=False, metadata={"help": "Whether to use anchor dataset"})
     anchor_batch_size_per_device: int = field(
         default=16, metadata={"help": "The batch size per device for anchor dataset"}
     )
-    safety_augmentation: bool = field(
-        default=False, metadata={"help": "Whether to use safety augmentation"}
-    )
+    safety_augmentation: bool = field(default=False, metadata={"help": "Whether to use safety augmentation"})
 
     use_spf: bool = field(
         default=False,
@@ -101,9 +80,7 @@ if __name__ == "__main__":
     model_kwargs = dict(
         revision=model_config.model_revision,
         trust_remote_code=model_config.trust_remote_code,
-        attn_implementation="eager"
-        if args.model_family == "gemma2"
-        else model_config.attn_implementation,
+        attn_implementation="eager" if args.model_family == "gemma2" else model_config.attn_implementation,
         torch_dtype=torch_dtype,
         use_cache=False if training_args.gradient_checkpointing else True,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
@@ -197,9 +174,7 @@ if __name__ == "__main__":
                 "json",
                 data_files="./finetuning_buckets/datasets/data/tasks/pure_safe.jsonl",
             )["train"]
-            safety_dataset = get_finetuning_data.string_formatting(
-                safety_dataset, string_format=args.model_family
-            )
+            safety_dataset = get_finetuning_data.string_formatting(safety_dataset, string_format=args.model_family)
             safety_data_collator = get_finetuning_data.get_data_collator(
                 tokenizer,
                 dataset_name=args.dataset_name,

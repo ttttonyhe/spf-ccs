@@ -1,5 +1,5 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 default_system_prompt = "You are a helpful assistant."
 
@@ -8,12 +8,12 @@ def initializer(model_name_or_path, model_kwargs, padding_side="right"):
     model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
     model.generation_config.do_sample = True
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model.config._name_or_path, add_eos_token=False, add_bos_token=False
-    )
-    if getattr(tokenizer, "pad_token", None) is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        model.config.pad_token_id = tokenizer.pad_token_id
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, add_eos_token=False, add_bos_token=False)
+    if getattr(tokenizer, "pad_token", None) is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
+        tokenizer.pad_token = "<|finetune_right_pad_id|>"
+
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.generation_config.pad_token_id = tokenizer.pad_token_id
     tokenizer.padding_side = padding_side
 
     return model, tokenizer
@@ -40,14 +40,10 @@ class Llama3StringConverter:
 
         # Handle system prompt
         if messages[0]["role"] == "system":
-            str_message += (
-                f"{HEADER_START}system{HEADER_END}{messages[0]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}system{HEADER_END}{messages[0]['content']}{EOS}"
             pt = 1
         else:
-            str_message += (
-                f"{HEADER_START}system{HEADER_END}{default_system_prompt}{EOS}"
-            )
+            str_message += f"{HEADER_START}system{HEADER_END}{default_system_prompt}{EOS}"
 
         if pt == len(messages):
             raise ValueError("The message should be user - assistant alternation")
@@ -56,9 +52,7 @@ class Llama3StringConverter:
             if messages[pt]["role"] != "user":
                 raise ValueError("The message should be user - assistant alternation")
 
-            str_message += (
-                f"{HEADER_START}user{HEADER_END}{messages[pt]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}user{HEADER_END}{messages[pt]['content']}{EOS}"
             pt += 1
 
             if pt >= len(messages):
@@ -67,9 +61,7 @@ class Llama3StringConverter:
             if messages[pt]["role"] != "assistant":
                 raise ValueError("The message should be user - assistant alternation")
 
-            str_message += (
-                f"{HEADER_START}assistant{HEADER_END}{messages[pt]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}assistant{HEADER_END}{messages[pt]['content']}{EOS}"
             pt += 1
 
         return {"text": str_message}
@@ -94,22 +86,16 @@ class Llama3StringConverter:
 
         # Handle system prompt
         if messages[0]["role"] == "system":
-            str_message += (
-                f"{HEADER_START}system{HEADER_END}{messages[0]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}system{HEADER_END}{messages[0]['content']}{EOS}"
             pt = 1
         else:
-            str_message += (
-                f"{HEADER_START}system{HEADER_END}{default_system_prompt}{EOS}"
-            )
+            str_message += f"{HEADER_START}system{HEADER_END}{default_system_prompt}{EOS}"
 
         while pt < len(messages) - 1:
             if messages[pt]["role"] != "user":
                 raise ValueError("The message should be user - assistant alternation")
 
-            str_message += (
-                f"{HEADER_START}user{HEADER_END}{messages[pt]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}user{HEADER_END}{messages[pt]['content']}{EOS}"
             pt += 1
 
             if pt >= len(messages) - 1:
@@ -118,15 +104,11 @@ class Llama3StringConverter:
             if messages[pt]["role"] != "assistant":
                 raise ValueError("The message should be user - assistant alternation")
 
-            str_message += (
-                f"{HEADER_START}assistant{HEADER_END}{messages[pt]['content']}{EOS}"
-            )
+            str_message += f"{HEADER_START}assistant{HEADER_END}{messages[pt]['content']}{EOS}"
             pt += 1
 
         if messages[-1]["role"] != "assistant":
-            raise ValueError(
-                "Completion only mode should end with a header of assistant message"
-            )
+            raise ValueError("Completion only mode should end with a header of assistant message")
 
         str_message += f"{HEADER_START}assistant{HEADER_END}{messages[-1]['content']}"
 
@@ -134,9 +116,7 @@ class Llama3StringConverter:
 
     def conversion_to_llama3_style_string(dataset):
         redundant_columns = list(dataset.features.keys())
-        dataset = dataset.map(
-            Llama3StringConverter.string_formatter, remove_columns=redundant_columns
-        )
+        dataset = dataset.map(Llama3StringConverter.string_formatter, remove_columns=redundant_columns)
         return dataset
 
 
@@ -157,16 +137,11 @@ class KeywordStoppingCriteria(StoppingCriteria):
         input_ids = input_ids.cpu()
         for seq in input_ids:
             for keyword_id in self.keyword_ids:
-                if (
-                    len(seq) >= len(keyword_id)
-                    and torch.all((keyword_id == seq[-len(keyword_id) :])).item()
-                ):
+                if len(seq) >= len(keyword_id) and torch.all((keyword_id == seq[-len(keyword_id) :])).item():
                     return True
         return False
 
 
 def get_llama3_stopping_criteria(tokenizer):
     stop_keywords = ["<|eot_id|>", "<|end_of_text|>"]
-    return StoppingCriteriaList(
-        [KeywordStoppingCriteria(keywords=stop_keywords, tokenizer=tokenizer)]
-    )
+    return StoppingCriteriaList([KeywordStoppingCriteria(keywords=stop_keywords, tokenizer=tokenizer)])
